@@ -1,112 +1,97 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import requests
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="基金分析平台", layout="wide")
+st.set_page_config(layout="wide")
+
+st.title("🚀 智能基金分析平台（真实数据版）")
 
 # =========================
-# 标题
+# 输入基金代码
 # =========================
-st.title("🚀 智能基金分析平台（顶级版）")
+code = st.text_input("输入基金代码", "000001")
 
 # =========================
-# 模拟数据（稳定展示）
+# 获取数据（东方财富API）
 # =========================
-data = [
-    {"代码": "000001", "名称": "华夏成长", "收益": 12.5, "回撤": 5.2, "波动": 3.1},
-    {"代码": "110011", "名称": "易方达中小盘", "收益": 15.3, "回撤": 6.1, "波动": 3.5},
-    {"代码": "161725", "名称": "招商白酒", "收益": 18.2, "回撤": 8.4, "波动": 4.2},
-    {"代码": "260108", "名称": "景顺成长", "收益": 10.8, "回撤": 4.3, "波动": 2.9},
-    {"代码": "163406", "名称": "兴全合润", "收益": 14.1, "回撤": 5.8, "波动": 3.3},
-]
+def get_fund_data(code):
+    url = f"http://fund.eastmoney.com/pingzhongdata/{code}.js"
+    try:
+        res = requests.get(url)
+        text = res.text
 
-df = pd.DataFrame(data)
+        import re
 
-# =========================
-# 评分模型
-# =========================
-df["评分"] = df["收益"] - df["回撤"] - df["波动"]
+        # 提取净值
+        data = re.search(r"Data_netWorthTrend = (.*?);", text)
+        if not data:
+            return None
 
-# =========================
-# 排行榜
-# =========================
-st.header("🏆 综合评分排行榜")
-rank_df = df.sort_values("评分", ascending=False)
-st.dataframe(rank_df, use_container_width=True)
+        import json
+        net = json.loads(data.group(1))
 
-# =========================
-# 收益榜
-# =========================
-st.header("📈 收益排行榜")
-st.dataframe(df.sort_values("收益", ascending=False), use_container_width=True)
+        df = pd.DataFrame(net)
+        df["date"] = pd.to_datetime(df["x"], unit="ms")
+        df["value"] = df["y"]
 
-# =========================
-# 稳健榜
-# =========================
-st.header("🛡 稳健排行榜（低回撤）")
-st.dataframe(df.sort_values("回撤"), use_container_width=True)
+        return df
+
+    except:
+        return None
+
+df = get_fund_data(code)
 
 # =========================
-# 推荐卡片
+# 分析
 # =========================
-st.header("🔥 智能推荐")
+if df is not None and not df.empty:
 
-top3 = rank_df.head(3)
-cols = st.columns(3)
+    df = df.sort_values("date")
 
-for i, (_, row) in enumerate(top3.iterrows()):
-    with cols[i]:
-        st.metric(row["名称"], f"{row['评分']} 分")
-        st.write(f"收益：{row['收益']}%")
-        st.write(f"回撤：{row['回撤']}%")
+    returns = df["value"].pct_change().dropna()
 
-# =========================
-# 基金分析
-# =========================
-st.header("🔍 单基金分析")
+    total_return = (df["value"].iloc[-1] / df["value"].iloc[0] - 1) * 100
+    volatility = returns.std() * 100
+    max_drawdown = ((df["value"].cummax() - df["value"]) / df["value"].cummax()).max() * 100
 
-code = st.selectbox("选择基金", df["代码"])
+    score = total_return - max_drawdown - volatility
 
-selected = df[df["代码"] == code].iloc[0]
+    col1, col2, col3, col4 = st.columns(4)
 
-st.write(f"📊 名称：{selected['名称']}")
-st.write(f"收益：{selected['收益']}%")
-st.write(f"回撤：{selected['回撤']}%")
-st.write(f"波动：{selected['波动']}%")
-st.write(f"评分：{selected['评分']}")
+    col1.metric("收益率", f"{total_return:.2f}%")
+    col2.metric("最大回撤", f"{max_drawdown:.2f}%")
+    col3.metric("波动率", f"{volatility:.2f}%")
+    col4.metric("评分", f"{score:.2f}")
 
-# =========================
-# 曲线模拟
-# =========================
-st.header("📉 净值走势")
+    # =========================
+    # 曲线
+    # =========================
+    fig, ax = plt.subplots()
+    ax.plot(df["date"], df["value"])
+    ax.set_title(f"{code} 净值走势")
+    st.pyplot(fig)
 
-x = np.arange(100)
-y = np.cumprod(1 + np.random.normal(0.001, 0.02, 100))
-
-fig, ax = plt.subplots()
-ax.plot(x, y)
-ax.set_title("基金走势模拟")
-st.pyplot(fig)
+else:
+    st.error("基金数据获取失败，请检查代码")
 
 # =========================
 # 多基金对比
 # =========================
 st.header("📊 多基金对比")
 
-codes = st.multiselect("选择基金对比", df["代码"], default=df["代码"][:2])
+codes = st.text_input("输入多个基金（逗号分隔）", "000001,110011")
 
-fig, ax = plt.subplots()
+if st.button("开始对比"):
+    codes_list = codes.split(",")
 
-for code in codes:
-    y = np.cumprod(1 + np.random.normal(0.001, 0.02, 100))
-    ax.plot(y, label=code)
+    fig, ax = plt.subplots()
 
-ax.legend()
-st.pyplot(fig)
+    for c in codes_list:
+        df = get_fund_data(c.strip())
+        if df is not None:
+            df = df.sort_values("date")
+            ax.plot(df["date"], df["value"], label=c)
 
-# =========================
-# 底部
-# =========================
-st.markdown("---")
-st.caption("基金分析平台 Demo（可扩展为商业系统）")
+    ax.legend()
+    st.pyplot(fig)
