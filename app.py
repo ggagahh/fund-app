@@ -52,6 +52,11 @@ def analyze(nav_df):
 # 首页推荐逻辑（自动）
 # =====================
 
+st.header("🏆 今日基金排行榜")
+
+rank_df = pd.DataFrame(results).sort_values("评分", ascending=False)
+
+st.dataframe(rank_df[["代码","名称","评分","收益","回撤","波动"]])
 st.header("🔥 智能推荐基金")
 
 candidate_codes = ["000001", "110011", "161725", "005827", "000832"]
